@@ -1,13 +1,21 @@
 {
-  "name": "Hope Awakened QR Scanner",
-  "short_name": "QRScan",
+  "name": "Hope Awakened Scanner",
+  "short_name": "Scanner",
   "start_url": "/scanner-pwa/index.html",
-  "scope": "/scanner-pwa/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
+  "orientation": "portrait",
   "icons": [
-    { "src": "/scanner-pwa/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/scanner-pwa/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "/scanner-pwa/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/scanner-pwa/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
   ]
 }
