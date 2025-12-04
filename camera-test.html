@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Test</title>
+<style>
+body { margin:0; background:black; }
+video {
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    background: black;
+}
+</style>
+</head>
+
+<body>
+<video id="v" autoplay playsinline webkit-playsinline muted></video>
+
+<script>
+async function startCam() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+        });
+        document.getElementById("v").srcObject = stream;
+        console.log("CAMERA STREAM OK");
+    } catch (e) {
+        alert("Camera error: " + e.message);
+        console.error(e);
+    }
+}
+startCam();
+</script>
+
+</body>
+</html>
