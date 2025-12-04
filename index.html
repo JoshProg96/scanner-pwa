@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 
-<!-- ZXING -->
+<!-- ZXING (WAJIB ADA !) -->
 <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@latest"></script>
 
 <style>
@@ -93,17 +93,8 @@
 <div id="result-box"></div>
 
 <script>
-/* BEEP */
-function beep() {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 900;
-    osc.connect(ctx.destination);
-    osc.start();
-    setTimeout(() => osc.stop(), 120);
-}
-
-function vibrate(ms = 120) {
+/* UTILITIES */
+function vibrate(ms = 80) {
     if (navigator.vibrate) navigator.vibrate(ms);
 }
 
@@ -113,83 +104,23 @@ setInterval(() => {
         navigator.onLine ? "none" : "block";
 }, 1000);
 
+/* CONSTANTS */
 let lastScan = 0;
 let isProcessing = false;
 const COOLDOWN = 2000;
-const VERIFY_URL = "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
+const VERIFY_URL =
+ "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
 
 const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
 
-    if ('serviceWorker' in navigator) {
+/* REMOVE ALL SERVICE WORKERS */
+if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => {
-            console.log("Unregistering old SW");
-            r.unregister();
-        });
+        regs.forEach(r => r.unregister());
     });
 }
 
-async function startScanner() {
-    try {
-        const video = document.getElementById("video");
-
-        const devices = await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices();
-        const camera = devices.find(d => d.label.toLowerCase().includes("back")) || devices[0];
-
-        document.getElementById("status").innerText = "Camera Ready";
-
-        await codeReader.decodeFromVideoDevice(camera.deviceId, video, async (result, err) => {
-
-            if (!result) return;
-
-            const now = Date.now();
-            if (now - lastScan < COOLDOWN) return;
-            if (isProcessing) return;
-
-            lastScan = now;
-            isProcessing = true;
-
-            beep();
-            vibrate();
-
-            const qr = result.text;
-            showResult("⏳ Checking...", "#222");
-
-            try {
-                const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, {
-                    method: "GET",
-                    redirect: "follow",
-                    cache: "no-store"
-                });
-
-                const html = await res.text();
-
-                if (html.includes("Tiket valid")) {
-                    showResult("✅ Tiket Valid", "#00cc66");
-                } else if (html.includes("digunakan")) {
-                    showResult("❌ Sudah Dipakai", "#cc0000");
-                } else if (html.includes("tidak ditemukan")) {
-                    showResult("❌ Tidak Ditemukan", "#cc0000");
-                } else {
-                    showResult("⚠ Error", "#ffaa00");
-                }
-
-            } catch (e) {
-                showResult("⚠ Koneksi bermasalah", "#ffaa00");
-            }
-
-            setTimeout(() => {
-                document.getElementById("result-box").style.display = "none";
-                isProcessing = false;
-            }, COOLDOWN);
-        });
-
-    } catch (err) {
-        document.getElementById("status").innerText = "Camera Error";
-        alert("Tidak bisa membuka kamera.\n\nPastikan:\n- Izinkan kamera\n- Gunakan Safari/Chrome\n- Jangan buka dari WhatsApp/Instagram");
-    }
-}
-
+/* SHOW RESULT BOX */
 function showResult(text, color) {
     const box = document.getElementById("result-box");
     box.innerText = text;
@@ -197,7 +128,110 @@ function showResult(text, color) {
     box.style.display = "block";
 }
 
-startScanner();
+/* MAIN CAMERA FUNCTION */
+async function startScanner() {
+    const statusEl = document.getElementById("status");
+    const video = document.getElementById("video");
+
+    try {
+        let devices = [];
+        try {
+            devices = await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices();
+        } catch (err) {
+            devices = [];
+        }
+
+        let cameraDeviceId;
+        if (devices.length > 0) {
+            const back = devices.find(d => d.label && d.label.toLowerCase().includes("back"));
+            const env = devices.find(d => d.label && d.label.toLowerCase().includes("environment"));
+            const pick = back || env || devices[0];
+            cameraDeviceId = pick.deviceId || undefined;
+        }
+
+        statusEl.innerText = "Camera Ready";
+
+        if (cameraDeviceId) {
+            try {
+                await codeReader.decodeFromVideoDevice(cameraDeviceId, video, onResultCallback);
+                return;
+            } catch (e) {
+                console.warn("ZXing deviceId failed, fallback", e);
+            }
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment" },
+                audio: false
+            });
+            video.srcObject = stream;
+
+            await new Promise(r => setTimeout(r, 350));
+
+            codeReader.decodeFromVideoDevice(undefined, video, onResultCallback);
+            return;
+        } catch (e) {
+            console.error("Fallback failed", e);
+            alert("Tidak bisa membuka kamera. Izinkan kamera dan buka di Safari/Chrome.");
+        }
+
+    } catch (err) {
+        console.error("Camera critical error", err);
+        alert("Camera error: " + err.message);
+    }
+}
+
+/* ZXING CALLBACK */
+async function onResultCallback(result, err) {
+    if (!result) return;
+
+    const now = Date.now();
+    if (now - lastScan < COOLDOWN) return;
+    if (isProcessing) return;
+
+    lastScan = now;
+    isProcessing = true;
+
+    vibrate(80);
+
+    const qr = result.text;
+    showResult("⏳ Checking...", "#222");
+
+    try {
+        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, {
+            method: "GET",
+            redirect: "follow",
+            cache: "no-store"
+        });
+
+        const html = await res.text();
+
+        if (html.includes("Tiket valid")) {
+            showResult("✅ Tiket Valid", "#00cc66");
+        } else if (html.includes("sudah")) {
+            showResult("❌ Sudah Dipakai", "#cc0000");
+        } else if (html.includes("tidak ditemukan")) {
+            showResult("❌ Tidak Ditemukan", "#cc0000");
+        } else if (html.includes("Belum Aktif")) {
+            showResult("⏳ Belum Aktif", "#ffaa00");
+        } else {
+            showResult("⚠ Error", "#ffaa00");
+        }
+
+    } catch (e) {
+        showResult("⚠ Koneksi bermasalah", "#ffaa00");
+    }
+
+    setTimeout(() => {
+        document.getElementById("result-box").style.display = "none";
+        isProcessing = false;
+    }, COOLDOWN);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(startScanner, 200);
+});
 </script>
 
 </body>
