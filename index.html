@@ -1,152 +1,64 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Fast QR Scanner</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QR Scanner</title>
 
-  <link rel="manifest" href="/manifest.json">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://unpkg.com/html5-qrcode" defer></script>
 
-  <style>
-    :root{--bg:#0b1220;--muted:#9aa4b2;--ok:#dff6e0;--err:#ffd6d6}
-    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:#fff}
-    .wrap{display:flex;flex-direction:column;height:100%;align-items:center;justify-content:flex-start;padding:12px}
-    header{width:100%;display:flex;align-items:center;justify-content:space-between}
-    header h1{font-size:18px;margin:0}
-    #video{width:100%;max-width:900px;border-radius:12px;background:#000}
-    #status{margin-top:14px;font-size:18px;color:var(--muted);text-align:center}
-    .msg{margin-top:18px;padding:18px;border-radius:10px;max-width:900px;width:100%;text-align:center;display:none}
-    .msg.ok{background:#073b16;color:#dff6e0}
-    .msg.err{background:#3b0707;color:#ffd6d6}
-    .controls{margin-top:10px;display:flex;gap:8px}
-    button{padding:8px 12px;border-radius:8px;border:none;background:#1e293b;color:#fff}
-  </style>
+<style>
+body { font-family: Arial; padding:20px; }
+#video { width:100%; max-width:350px; margin:auto; }
+#status { margin-top:10px; font-weight:bold; }
+</style>
 </head>
-
 <body>
-  <div class="wrap">
-    <header>
-      <h1>Fast QR Scanner</h1>
-      <div id="count">--</div>
-    </header>
 
-    <video id="video" playsinline autoplay></video>
-    <div id="status">Camera initializing...</div>
-    <div id="message" class="msg"></div>
+<h2>QR Scanner</h2>
 
-    <div class="controls">
-      <button id="toggleFlash">Toggle Flash</button>
-      <button id="retryStored">Retry Offline Scans</button>
-    </div>
-  </div>
+<div id="video"></div>
+<div id="status">Loading camera…</div>
 
-  <script defer src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.1/umd/index.min.js"></script>
+<script>
+function updateCount() {
+  const items = JSON.parse(localStorage.getItem("scanned") || "[]");
+  document.getElementById("status").textContent = "Stored: " + items.length + " data";
+}
 
-  <script>
-  (function(){
+function handleResult(qr) {
+  const items = JSON.parse(localStorage.getItem("scanned") || "[]");
+  items.push({ data: qr, time: new Date().toISOString() });
+  localStorage.setItem("scanned", JSON.stringify(items));
+  updateCount();
+}
 
-    const WEB_APP = "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec"; // GANTI DISINI
+async function start() {
+  try {
+    const html5QrCode = new Html5Qrcode("video");
 
-    const video = document.getElementById('video');
-    const status = document.getElementById('status');
-    const message = document.getElementById('message');
-    const countEl = document.getElementById('count');
-    const retryBtn = document.getElementById('retryStored');
-    const flashBtn = document.getElementById('toggleFlash');
-
-    let codeReader;
-    let selectedDeviceId;
-    let torchOn = false;
-
-    function showMsg(text, type){
-      message.style.display = 'block';
-      message.className = 'msg ' + (type === 'ok' ? 'ok' : 'err');
-      message.innerHTML = text;
-      setTimeout(()=>{ message.style.display='none'; }, 4000);
+    const cameras = await Html5Qrcode.getCameras();
+    if (!cameras || cameras.length === 0) {
+      throw new Error("No camera found");
     }
 
-    async function start() {
-      try {
-        codeReader = new ZXing.BrowserMultiFormatReader();
-        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
-        if (!devices || devices.length === 0) throw new Error('No camera');
+    const cameraId = cameras[cameras.length - 1].id;
 
-        selectedDeviceId = devices[devices.length-1].deviceId || devices[0].deviceId;
+    await html5QrCode.start(
+      cameraId,
+      { fps: 10, qrbox: 250 },
+      qr => handleResult(qr)
+    );
 
-        await codeReader.decodeFromVideoDevice(selectedDeviceId, video, (result) => {
-          if (result) handleResult(result.getText());
-        });
-
-        status.textContent = 'Camera ready — point to a QR';
-        updateCount();
-
-      } catch (e) {
-        status.textContent = 'Camera error: ' + (e?.message || e);
-      }
-    }
-
-    function updateCount(){
-      let keys = Object.keys(localStorage).filter(k => k.startsWith('qr_off_'));
-      countEl.textContent = 'Stored: ' + keys.length;
-    }
-
-    async function handleResult(qr){
-      status.textContent = 'Scanned: ' + qr;
-
-      try {
-        const r = await fetch(WEB_APP + '?code=' + encodeURIComponent(qr), { mode:'cors' });
-        const text = await r.text();
-        document.open(); document.write(text); document.close();
-      } catch (e) {
-        const k = 'qr_off_' + Date.now();
-        localStorage.setItem(k, qr);
-        showMsg('Offline — scan saved and will retry when online','err');
-        updateCount();
-      }
-    }
-
-    retryBtn.addEventListener('click', async () => {
-      const keys = Object.keys(localStorage).filter(k=>k.startsWith('qr_off_'));
-      if (keys.length === 0){ showMsg('No stored scans','ok'); return; }
-
-      for (let k of keys){
-        const qr = localStorage.getItem(k);
-        try {
-          const r = await fetch(WEB_APP + '?code=' + encodeURIComponent(qr), { mode:'cors' });
-          if (r.status === 200) localStorage.removeItem(k);
-        } catch {
-          showMsg('Still offline. Will retry later','err');
-          break;
-        }
-      }
-      updateCount();
-    });
-
-    flashBtn.addEventListener('click', async () => {
-      try {
-        const stream = video.srcObject;
-        const track = stream.getVideoTracks()[0];
-        const cap = track.getCapabilities();
-        if (!cap.torch){ showMsg('Torch not supported','err'); return; }
-        torchOn = !torchOn;
-        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-      } catch {
-        showMsg('Torch failed','err');
-      }
-    });
-
-    start();
+    document.getElementById("status").textContent = "Camera ready — point to a QR";
     updateCount();
 
-    window.addEventListener('online', () => {
-      showMsg('Back online — retrying stored scans','ok');
-      retryBtn.click();
-    });
+  } catch (e) {
+    document.getElementById("status").textContent = "Camera error: " + (e.message || e);
+  }
+}
 
-  })();
-
-  </script>
+window.onload = start;
+</script>
 </body>
 </html>
