@@ -8,13 +8,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 
-<!-- ZXING (STABLE BROWSER VERSION) -->
-<script src="https://unpkg.com/@zxing/library@0.18.6"></script>
-
 <style>
     body { margin:0; background:#000; color:#fff; overflow:hidden; font-family:sans-serif; }
-    #camera-container { position:fixed; inset:0; background:#000; }
-    video { width:100vw; height:100vh; object-fit:cover; background:#000; }
+    video { position:fixed; inset:0; width:100vw; height:100vh; object-fit:cover; background:#000; }
     #frame {
         position:fixed; top:50%; left:50%;
         width:65%; height:35%;
@@ -30,26 +26,23 @@
     }
     #status {
         position:fixed; top:10px; right:12px;
-        background:rgba(0,0,0,0.5);
-        padding:8px 12px; border-radius:8px;
-        font-size:14px;
+        background:rgba(0,0,0,0.5); padding:8px 12px;
+        border-radius:8px; font-size:14px;
     }
 </style>
-</head>
 
+</head>
 <body>
 
-<div id="status">Loading camera...</div>
-
-<div id="camera-container">
-    <video id="video" autoplay playsinline webkit-playsinline muted></video>
-    <div id="frame"></div>
-</div>
-
+<div id="status">Loading camera…</div>
+<video id="video" autoplay playsinline webkit-playsinline muted></video>
+<canvas id="canvas" style="display:none;"></canvas>
+<div id="frame"></div>
 <div id="result-box"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
 <script>
-/* --- LIMIT SCAN SPEED --- */
 let lastScan = 0;
 let isProcessing = false;
 const COOLDOWN = 2000;
@@ -57,76 +50,105 @@ const COOLDOWN = 2000;
 const VERIFY_URL =
  "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
 
+/* REMOVE SW */
+if ("serviceWorker" in navigator){
+    navigator.serviceWorker.getRegistrations().then(r=>r.forEach(x=>x.unregister()));
+}
+
 function vibrate(ms=70){ if(navigator.vibrate) navigator.vibrate(ms); }
 
 function showResult(text,color){
-    const box=document.getElementById("result-box");
-    box.innerText=text;
-    box.style.background=color;
-    box.style.display="block";
+    const box = document.getElementById("result-box");
+    box.innerText = text;
+    box.style.background = color;
+    box.style.display = "block";
 }
 
-/* REMOVE SERVICE WORKER (prevent camera block) */
-if("serviceWorker" in navigator){
-    navigator.serviceWorker.getRegistrations().then(regs=>{
-        regs.forEach(r=>r.unregister());
-    });
-}
-
-/* --- CAMERA START (ZXING v0.18.6) --- */
-async function startScanner(){
-    const video = document.getElementById("video");
-    const statusEl = document.getElementById("status");
+/* START CAMERA */
+async function startCamera(){
+    const status = document.getElementById("status");
 
     try {
-        const hints = new ZXing.DecodeHintType();
-        const formats = [ ZXing.BarcodeFormat.QR_CODE ];
-        const reader = new ZXing.BrowserMultiFormatReader();
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode:"environment" },
+            audio:false
+        });
+        const video = document.getElementById("video");
+        video.srcObject = stream;
 
-        // Choose camera
-        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
-        let cameraId = undefined;
+        video.onloadedmetadata = () => {
+            status.innerText = "Camera Ready";
+            requestAnimationFrame(scanLoop);
+        };
 
-        if(devices.length > 0){
-            const back = devices.find(d=>d.label?.toLowerCase().includes("back"));
-            const env = devices.find(d=>d.label?.toLowerCase().includes("environment"));
-            cameraId = (back || env || devices[0]).deviceId;
-        }
-
-        statusEl.innerText="Camera Ready";
-
-        // Start decode
-        await reader.decodeFromVideoDevice(cameraId, video, onResult);
-
-    } catch (e) {
+    } catch (e){
         console.error(e);
-        alert("Tidak bisa buka kamera. Izinkan kamera di Safari/Chrome.");
+        alert("Tidak bisa membuka kamera. Pastikan sudah diizinkan.");
     }
 }
 
-async function onResult(result,err){
-    if(!result) return;
-
+/* SCAN LOOP (uses BarcodeDetector if available) */
+async function scanLoop(){
     const now = Date.now();
-    if(now - lastScan < COOLDOWN) return;
-    if(isProcessing) return;
+    if(now - lastScan < COOLDOWN || isProcessing){
+        requestAnimationFrame(scanLoop);
+        return;
+    }
+
+    const video = document.getElementById("video");
+    if(video.readyState !== 4){
+        requestAnimationFrame(scanLoop);
+        return;
+    }
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video,0,0);
+
+    // --- Attempt 1: BarcodeDetector (FASTEST)
+    if ("BarcodeDetector" in window){
+        try {
+            const detector = new BarcodeDetector({ formats: ["qr_code"] });
+            const codes = await detector.detect(canvas);
+            if (codes.length > 0){
+                processQR(codes[0].rawValue);
+                return;
+            }
+        } catch {}
+    }
+
+    // --- Attempt 2: jsQR fallback (Safari)
+    const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const code = jsQR(img.data, canvas.width, canvas.height);
+    if (code){
+        processQR(code.data);
+        return;
+    }
+
+    requestAnimationFrame(scanLoop);
+}
+
+/* PROCESS QR */
+async function processQR(text){
+    const now = Date.now();
+    if(now - lastScan < COOLDOWN || isProcessing) return;
 
     lastScan = now;
     isProcessing = true;
 
     vibrate();
-
-    const qr = result.getText();
-    showResult("⏳ Checking...", "#222");
+    showResult("⏳ Checking…", "#222");
 
     try{
-        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, { cache:"no-store" });
+        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(text)}`, {cache:"no-store"});
         const html = await res.text();
 
-        if(html.includes("Tiket valid")) showResult("✅ Tiket Valid", "#00cc66");
-        else if(html.includes("digunakan")) showResult("❌ Sudah Dipakai", "#cc0000");
-        else if(html.includes("tidak ditemukan")) showResult("❌ Tidak Ditemukan", "#cc0000");
-        else showResult("⚠ Error", "#ffaa00");
+        if(html.includes("Tiket valid")) showResult("✅ Tiket Valid","#00cc66");
+        else if(html.includes("digunakan")) showResult("❌ Sudah Dipakai","#cc0000");
+        else if(html.includes("tidak ditemukan")) showResult("❌ Tidak Ditemukan","#cc0000");
+        else showResult("⚠ Error","#ffaa00");
 
     }catch(e){
         showResult("⚠ Koneksi bermasalah","#ffaa00");
@@ -134,11 +156,13 @@ async function onResult(result,err){
 
     setTimeout(()=>{
         document.getElementById("result-box").style.display="none";
-        isProcessing=false;
+        isProcessing = false;
     }, COOLDOWN);
+
+    requestAnimationFrame(scanLoop);
 }
 
-document.addEventListener("DOMContentLoaded", ()=> setTimeout(startScanner,200));
+document.addEventListener("DOMContentLoaded", startCamera);
 </script>
 
 </body>
