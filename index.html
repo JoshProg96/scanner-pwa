@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>QR Scanner</title>
 
-<script src="https://unpkg.com/html5-qrcode" defer></script>
+<!-- FIX 1: Pakai versi stabil -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8"></script>
 
 <style>
 body { font-family: Arial; padding:20px; }
@@ -21,11 +22,14 @@ body { font-family: Arial; padding:20px; }
 <div id="status">Loading camera…</div>
 
 <script>
+/* Update count */
 function updateCount() {
   const items = JSON.parse(localStorage.getItem("scanned") || "[]");
-  document.getElementById("status").textContent = "Stored: " + items.length + " data";
+  document.getElementById("status").textContent =
+    "Stored: " + items.length + " data";
 }
 
+/* Save result */
 function handleResult(qr) {
   const items = JSON.parse(localStorage.getItem("scanned") || "[]");
   items.push({ data: qr, time: new Date().toISOString() });
@@ -33,6 +37,7 @@ function handleResult(qr) {
   updateCount();
 }
 
+/* Start scanner */
 async function start() {
   try {
     const html5QrCode = new Html5Qrcode("reader");
@@ -60,7 +65,9 @@ async function start() {
   }
 }
 
-window.onload = start;
+/* FIX 2: Ganti dari window.onload ke DOMContentLoaded */
+document.addEventListener("DOMContentLoaded", start);
 </script>
+
 </body>
 </html>
