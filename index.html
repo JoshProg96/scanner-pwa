@@ -5,77 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hope Awakened Scanner</title>
 
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
 
-<!-- ZXING (WAJIB ADA !) -->
-<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@latest"></script>
+<!-- ZXING UMD BUILD (IMPORTANT FIX) -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/umd/index.min.js"></script>
 
 <style>
-    body {
-        margin: 0;
-        background: #000;
-        color: white;
-        font-family: Arial, sans-serif;
-        overflow: hidden;
-    }
-
-    #camera-container {
-        position: fixed;
-        inset: 0;
-        background: black;
-    }
-
-    video {
-        width: 100vw;
-        height: 100vh;
-        object-fit: cover;
-        background: #000;
-    }
-
+    body { margin:0; background:#000; color:#fff; overflow:hidden; font-family:sans-serif; }
+    #camera-container { position:fixed; inset:0; background:#000; }
+    video { width:100vw; height:100vh; object-fit:cover; background:#000; }
     #frame {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        width: 65%;
-        height: 35%;
-        border: 4px solid rgba(255,255,255,0.8);
-        border-radius: 12px;
-        transform: translate(-50%, -50%);
-        box-shadow: 0 0 15px rgba(255,255,255,0.7);
+        position:fixed; top:50%; left:50%;
+        width:65%; height:35%;
+        border:4px solid rgba(255,255,255,0.8);
+        border-radius:12px;
+        transform:translate(-50%, -50%);
+        box-shadow:0 0 15px rgba(255,255,255,0.7);
     }
-
     #result-box {
-        position: fixed;
-        bottom: 0;
-        width: 100%;
-        padding: 20px;
-        text-align: center;
-        font-size: 26px;
-        display: none;
-        font-weight: bold;
+        position:fixed; bottom:0; width:100%; padding:20px;
+        font-size:26px; font-weight:bold; text-align:center;
+        display:none;
     }
-
     #status {
-        position: fixed;
-        top: 10px;
-        right: 12px;
-        background: rgba(0,0,0,0.6);
-        padding: 8px 12px;
-        border-radius: 8px;
-        font-size: 14px;
+        position:fixed; top:10px; right:12px;
+        background:rgba(0,0,0,0.5);
+        padding:8px 12px; border-radius:8px; font-size:14px;
     }
-
     #offline-warning {
-        position: fixed;
-        top: 0;
-        width: 100%;
-        background: #ffcc00;
-        color: black;
-        padding: 10px;
-        text-align: center;
-        display: none;
-        font-weight: bold;
+        position:fixed; top:0; width:100%; padding:10px;
+        background:#ffcc00; color:#000; display:none; text-align:center;
+        font-weight:bold;
     }
 </style>
 </head>
@@ -93,145 +54,110 @@
 <div id="result-box"></div>
 
 <script>
-/* UTILITIES */
-function vibrate(ms = 80) {
-    if (navigator.vibrate) navigator.vibrate(ms);
-}
+/* ====== UTIL ====== */
+function vibrate(ms=80){ if(navigator.vibrate) navigator.vibrate(ms); }
+setInterval(()=>{ document.getElementById("offline-warning").style.display = navigator.onLine ? "none":"block"; },1000);
 
-/* INTERNET CHECK */
-setInterval(() => {
-    document.getElementById("offline-warning").style.display =
-        navigator.onLine ? "none" : "block";
-}, 1000);
-
-/* CONSTANTS */
-let lastScan = 0;
-let isProcessing = false;
-const COOLDOWN = 2000;
-const VERIFY_URL =
- "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
+/* ====== CONSTANT ====== */
+let lastScan=0, isProcessing=false;
+const COOLDOWN=2000;
+const VERIFY_URL="https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
 
 const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
 
-/* REMOVE ALL SERVICE WORKERS */
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.unregister());
-    });
+/* ====== REMOVE SERVICE WORKER ====== */
+if("serviceWorker" in navigator){
+    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r=>r.unregister()));
 }
 
-/* SHOW RESULT BOX */
-function showResult(text, color) {
-    const box = document.getElementById("result-box");
-    box.innerText = text;
-    box.style.background = color;
-    box.style.display = "block";
+/* ====== RESULT BOX ====== */
+function showResult(text,color){
+    const box=document.getElementById("result-box");
+    box.innerText=text; box.style.background=color;
+    box.style.display="block";
 }
 
-/* MAIN CAMERA FUNCTION */
-async function startScanner() {
-    const statusEl = document.getElementById("status");
-    const video = document.getElementById("video");
+/* ====== SCANNER LOGIC ====== */
+async function startScanner(){
+    const video=document.getElementById("video");
+    const statusEl=document.getElementById("status");
 
     try {
-        let devices = [];
-        try {
-            devices = await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices();
-        } catch (err) {
-            devices = [];
+        let devices=[];
+        try{ devices=await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices(); }
+        catch(e){ devices=[]; }
+
+        let cameraId;
+        if(devices.length>0){
+            const back=devices.find(d=>d.label?.toLowerCase().includes("back"));
+            const env=devices.find(d=>d.label?.toLowerCase().includes("environment"));
+            let pick=back||env||devices[0];
+            cameraId=pick.deviceId;
         }
 
-        let cameraDeviceId;
-        if (devices.length > 0) {
-            const back = devices.find(d => d.label && d.label.toLowerCase().includes("back"));
-            const env = devices.find(d => d.label && d.label.toLowerCase().includes("environment"));
-            const pick = back || env || devices[0];
-            cameraDeviceId = pick.deviceId || undefined;
-        }
+        statusEl.innerText="Camera Ready";
 
-        statusEl.innerText = "Camera Ready";
-
-        if (cameraDeviceId) {
-            try {
-                await codeReader.decodeFromVideoDevice(cameraDeviceId, video, onResultCallback);
+        /* Try ZXing with deviceId */
+        try{
+            if(cameraId){
+                await codeReader.decodeFromVideoDevice(cameraId, video, onScan);
                 return;
-            } catch (e) {
-                console.warn("ZXing deviceId failed, fallback", e);
             }
-        }
+        }catch(e){ console.warn("ZXing with deviceId failed",e); }
 
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: "environment" },
-                audio: false
-            });
-            video.srcObject = stream;
+        /* Fallback getUserMedia */
+        const stream=await navigator.mediaDevices.getUserMedia({
+            video:{ facingMode:"environment" },
+            audio:false
+        });
+        video.srcObject=stream;
 
-            await new Promise(r => setTimeout(r, 350));
+        await new Promise(r=>setTimeout(r,400));
+        codeReader.decodeFromVideoDevice(null, video, onScan);
 
-            codeReader.decodeFromVideoDevice(undefined, video, onResultCallback);
-            return;
-        } catch (e) {
-            console.error("Fallback failed", e);
-            alert("Tidak bisa membuka kamera. Izinkan kamera dan buka di Safari/Chrome.");
-        }
-
-    } catch (err) {
-        console.error("Camera critical error", err);
-        alert("Camera error: " + err.message);
+    } catch(e){
+        console.error(e);
+        alert("Camera error. Pastikan izin kamera ON dan gunakan Safari/Chrome.");
     }
 }
 
-/* ZXING CALLBACK */
-async function onResultCallback(result, err) {
-    if (!result) return;
+/* ====== ZXing callback ====== */
+async function onScan(result,err){
+    if(!result) return;
 
-    const now = Date.now();
-    if (now - lastScan < COOLDOWN) return;
-    if (isProcessing) return;
+    const now=Date.now();
+    if(now-lastScan<COOLDOWN) return;
+    if(isProcessing) return;
 
-    lastScan = now;
-    isProcessing = true;
-
+    lastScan=now; isProcessing=true;
     vibrate(80);
 
-    const qr = result.text;
+    const qr=result.text;
     showResult("⏳ Checking...", "#222");
 
-    try {
-        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, {
-            method: "GET",
-            redirect: "follow",
-            cache: "no-store"
+    try{
+        const res=await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`,{
+            method:"GET", cache:"no-store"
         });
+        const html=await res.text();
 
-        const html = await res.text();
+        if(html.includes("Tiket valid")) showResult("✅ Tiket Valid","#00cc66");
+        else if(html.includes("digunakan")) showResult("❌ Sudah Dipakai","#cc0000");
+        else if(html.includes("tidak ditemukan")) showResult("❌ Tidak Ditemukan","#cc0000");
+        else showResult("⚠ Error","#ffaa00");
 
-        if (html.includes("Tiket valid")) {
-            showResult("✅ Tiket Valid", "#00cc66");
-        } else if (html.includes("sudah")) {
-            showResult("❌ Sudah Dipakai", "#cc0000");
-        } else if (html.includes("tidak ditemukan")) {
-            showResult("❌ Tidak Ditemukan", "#cc0000");
-        } else if (html.includes("Belum Aktif")) {
-            showResult("⏳ Belum Aktif", "#ffaa00");
-        } else {
-            showResult("⚠ Error", "#ffaa00");
-        }
-
-    } catch (e) {
-        showResult("⚠ Koneksi bermasalah", "#ffaa00");
+    }catch(e){
+        showResult("⚠ Koneksi bermasalah","#ffaa00");
     }
 
-    setTimeout(() => {
-        document.getElementById("result-box").style.display = "none";
-        isProcessing = false;
-    }, COOLDOWN);
+    setTimeout(()=>{
+        document.getElementById("result-box").style.display="none";
+        isProcessing=false;
+    },COOLDOWN);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-    setTimeout(startScanner, 200);
-});
+/* ====== START ====== */
+document.addEventListener("DOMContentLoaded",()=>setTimeout(startScanner,200));
 </script>
 
 </body>
