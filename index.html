@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hope Awakened Scanner</title>
 
-<!-- ZXING BROWSER (FAST) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+<!-- ZXING -->
 <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@latest"></script>
 
 <style>
@@ -27,9 +30,9 @@
         width: 100vw;
         height: 100vh;
         object-fit: cover;
+        background: #000;
     }
 
-    /* FRAME */
     #frame {
         position: fixed;
         top: 50%;
@@ -42,14 +45,13 @@
         box-shadow: 0 0 15px rgba(255,255,255,0.7);
     }
 
-    /* RESULT BOX */
     #result-box {
         position: fixed;
         bottom: 0;
         width: 100%;
-        padding: 18px;
+        padding: 20px;
         text-align: center;
-        font-size: 24px;
+        font-size: 26px;
         display: none;
         font-weight: bold;
     }
@@ -60,8 +62,8 @@
         right: 12px;
         background: rgba(0,0,0,0.6);
         padding: 8px 12px;
-        font-size: 14px;
         border-radius: 8px;
+        font-size: 14px;
     }
 
     #offline-warning {
@@ -79,20 +81,19 @@
 </head>
 
 <body>
-<div id="offline-warning">⚠ Tidak ada koneksi internet — scanning memerlukan koneksi.</div>
+
+<div id="offline-warning">⚠ Tidak ada koneksi internet.</div>
 <div id="status">Loading camera...</div>
 
 <div id="camera-container">
-    <video id="video" autoplay></video>
+    <video id="video" autoplay playsinline webkit-playsinline muted></video>
     <div id="frame"></div>
 </div>
 
 <div id="result-box"></div>
 
 <script>
-/* ============================================================
-   UTILITIES
-============================================================ */
+/* BEEP */
 function beep() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
@@ -106,20 +107,15 @@ function vibrate(ms = 120) {
     if (navigator.vibrate) navigator.vibrate(ms);
 }
 
-/* ============================================================
-   INTERNET CHECKER
-============================================================ */
+/* INTERNET CHECK */
 setInterval(() => {
     document.getElementById("offline-warning").style.display =
         navigator.onLine ? "none" : "block";
 }, 1000);
 
-/* ============================================================
-   ZXING SCANNER SETUP
-============================================================ */
 let lastScan = 0;
 let isProcessing = false;
-const SCAN_COOLDOWN = 2000; // 2 detik
+const COOLDOWN = 2000;
 const VERIFY_URL = "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
 
 const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
@@ -129,8 +125,7 @@ async function startScanner() {
         const video = document.getElementById("video");
 
         const devices = await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices();
-        const camera = devices.find(d => d.label.toLowerCase().includes("back"))
-                  || devices[0];
+        const camera = devices.find(d => d.label.toLowerCase().includes("back")) || devices[0];
 
         document.getElementById("status").innerText = "Camera Ready";
 
@@ -139,19 +134,18 @@ async function startScanner() {
             if (!result) return;
 
             const now = Date.now();
-            if (now - lastScan < SCAN_COOLDOWN) return;
+            if (now - lastScan < COOLDOWN) return;
             if (isProcessing) return;
 
             lastScan = now;
             isProcessing = true;
 
-            const qr = result.text;
-            showResult("⏳ Checking...", "#222");
-
             beep();
             vibrate();
 
-            // CALL GOOGLE SCRIPT
+            const qr = result.text;
+            showResult("⏳ Checking...", "#222");
+
             try {
                 const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, {
                     method: "GET",
@@ -163,46 +157,37 @@ async function startScanner() {
 
                 if (html.includes("Tiket valid")) {
                     showResult("✅ Tiket Valid", "#00cc66");
-                }
-                else if (html.includes("sudah digunakan")) {
+                } else if (html.includes("digunakan")) {
                     showResult("❌ Sudah Dipakai", "#cc0000");
-                }
-                else if (html.includes("tidak ditemukan")) {
+                } else if (html.includes("tidak ditemukan")) {
                     showResult("❌ Tidak Ditemukan", "#cc0000");
-                }
-                else if (html.includes("Belum Aktif")) {
-                    showResult("⏳ Belum Aktif", "#ffaa00");
-                }
-                else {
+                } else {
                     showResult("⚠ Error", "#ffaa00");
                 }
 
             } catch (e) {
-                showResult("⚠ Koneksi Bermasalah", "#ffaa00");
+                showResult("⚠ Koneksi bermasalah", "#ffaa00");
             }
 
             setTimeout(() => {
                 document.getElementById("result-box").style.display = "none";
                 isProcessing = false;
-            }, SCAN_COOLDOWN);
+            }, COOLDOWN);
         });
 
     } catch (err) {
         document.getElementById("status").innerText = "Camera Error";
-        alert("Camera gagal dibuka. Pastikan:\n\n- Izinkan kamera\n- Gunakan Safari / Chrome\n- Jangan dibuka dari Instagram/WA");
+        alert("Tidak bisa membuka kamera.\n\nPastikan:\n- Izinkan kamera\n- Gunakan Safari/Chrome\n- Jangan buka dari WhatsApp/Instagram");
     }
 }
 
 function showResult(text, color) {
-    const rb = document.getElementById("result-box");
-    rb.innerText = text;
-    rb.style.background = color;
-    rb.style.display = "block";
+    const box = document.getElementById("result-box");
+    box.innerText = text;
+    box.style.background = color;
+    box.style.display = "block";
 }
 
-/* ============================================================
-   START
-============================================================ */
 startScanner();
 </script>
 
