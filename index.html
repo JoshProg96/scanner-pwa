@@ -1,13 +1,159 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>QR Scanner</title>
-  <link rel="manifest" href="manifest.json" />
-  <script src="scanner.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fast QR Scanner</title>
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root{--bg:#0b1220;--muted:#9aa4b2;--ok:#dff6e0;--err:#ffd6d6}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:#fff}
+    .wrap{display:flex;flex-direction:column;height:100%;align-items:center;justify-content:flex-start;padding:12px}
+    header{width:100%;display:flex;align-items:center;justify-content:space-between}
+    header h1{font-size:18px;margin:0}
+    #video{width:100%;max-width:900px;border-radius:12px;background:#000;height:60vh;object-fit:cover}
+    #status{margin-top:10px;font-size:16px;color:var(--muted);text-align:center}
+    .msg{margin-top:12px;padding:14px;border-radius:10px;max-width:900px;width:100%;text-align:center}
+    .msg.ok{background:#073b16;color:#dff6e0}
+    .msg.err{background:#3b0707;color:#ffd6d6}
+    .controls{margin-top:10px;display:flex;gap:8px}
+    button{padding:8px 12px;border-radius:8px;border:none;background:#1e293b;color:#fff}
+    small{color:var(--muted)}
+  </style>
 </head>
 <body>
-  <h1>QR Scanner</h1>
-  <video id="preview" style="width:100%;"></video>
+  <div class="wrap">
+    <header>
+      <h1>Fast QR Scanner</h1>
+      <div id="storedCount">Stored: 0</div>
+    </header>
+
+    <video id="video" playsinline autoplay></video>
+
+    <div id="status">Initializing camera...</div>
+
+    <div id="message" class="msg" style="display:none"></div>
+
+    <div class="controls">
+      <button id="toggleFlash">Toggle Flash</button>
+      <button id="retryStored">Retry Offline</button>
+      <button id="stopBtn">Stop</button>
+    </div>
+
+    <div style="margin-top:12px"><small>Tip: gunakan kamera belakang.</small></div>
+  </div>
+
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+
+  <script>
+  (function(){
+    const WEB_APP = "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
+    const OFFKEY_PREFIX = 'qr_off_';
+    const video = document.getElementById('video');
+    const status = document.getElementById('status');
+    const message = document.getElementById('message');
+    const storedCountEl = document.getElementById('storedCount');
+    const retryBtn = document.getElementById('retryStored');
+    const flashBtn = document.getElementById('toggleFlash');
+    const stopBtn = document.getElementById('stopBtn');
+
+    let codeReader = null;
+    let torchOn = false;
+
+    function showMsg(text, kind){
+      message.style.display='block';
+      message.className = 'msg ' + (kind==='ok'? 'ok':'err');
+      message.innerHTML = text;
+      setTimeout(()=>{ message.style.display='none' }, 4000);
+    }
+
+    function updateStoredCount(){
+      const keys = Object.keys(localStorage).filter(k=>k.startsWith(OFFKEY_PREFIX));
+      storedCountEl.textContent = 'Stored: ' + keys.length;
+    }
+
+    async function startScanner(){
+      try{
+        codeReader = new ZXing.BrowserMultiFormatReader();
+        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+        if(!devices || devices.length===0) throw new Error('No camera found');
+        const selected = devices[devices.length-1].deviceId || devices[0].deviceId;
+
+        await codeReader.decodeFromVideoDevice(selected, 'video', (result, err) => {
+          if(result) onScan(result.getText());
+        });
+
+        status.textContent = 'Camera ready — point to QR code';
+      }catch(err){
+        status.textContent = 'Camera error: ' + (err.message || err);
+      }
+    }
+
+    async function stopScanner(){
+      try{
+        if(codeReader){ codeReader.reset(); }
+        const stream = video.srcObject;
+        if(stream){
+          stream.getTracks().forEach(t=>t.stop());
+          video.srcObject = null;
+        }
+        status.textContent = 'Scanner stopped';
+      }catch(e){}
+    }
+
+    async function onScan(qr){
+      status.textContent = 'Scanned — validating...';
+      try{
+        const res = await fetch(WEB_APP + '?code=' + encodeURIComponent(qr), { mode: 'cors' });
+        const html = await res.text();
+        document.open(); document.write(html); document.close();
+      }catch(e){
+        const key = OFFKEY_PREFIX + Date.now();
+        try{ localStorage.setItem(key, qr); }catch(err){}
+        showMsg('Offline — scan saved', 'err');
+        updateStoredCount();
+      }
+    }
+
+    retryBtn.addEventListener('click', async ()=>{
+      const keys = Object.keys(localStorage).filter(k=>k.startsWith(OFFKEY_PREFIX));
+      if(keys.length===0){ showMsg('No stored scans', 'ok'); return; }
+      for(let k of keys){
+        const qr = localStorage.getItem(k);
+        try{
+          const r = await fetch(WEB_APP + '?code=' + encodeURIComponent(qr), { mode:'cors' });
+          if(r && r.status===200){ localStorage.removeItem(k); }
+        }catch(e){ break; }
+      }
+      updateStoredCount();
+    });
+
+    flashBtn.addEventListener('click', async ()=>{
+      try{
+        const stream = video.srcObject;
+        if(!stream) return;
+        const track = stream.getVideoTracks()[0];
+        const cap = track.getCapabilities();
+        if(!cap.torch) return;
+        torchOn = !torchOn;
+        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+      }catch(e){}
+    });
+
+    stopBtn.addEventListener('click', ()=>{ stopScanner(); });
+
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('./service-worker.js');
+    }
+
+    window.addEventListener('online', ()=>{ retryBtn.click(); });
+
+    startScanner();
+    updateStoredCount();
+  })();
+  </script>
 </body>
 </html>
