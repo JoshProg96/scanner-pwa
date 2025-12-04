@@ -9,7 +9,7 @@
 
 <style>
 body { font-family: Arial; padding:20px; }
-#video { width:100%; max-width:350px; margin:auto; }
+#reader { width:100%; max-width:350px; margin:auto; }
 #status { margin-top:10px; font-weight:bold; }
 </style>
 </head>
@@ -17,7 +17,7 @@ body { font-family: Arial; padding:20px; }
 
 <h2>QR Scanner</h2>
 
-<div id="video"></div>
+<div id="reader"></div>
 <div id="status">Loading camera…</div>
 
 <script>
@@ -35,7 +35,7 @@ function handleResult(qr) {
 
 async function start() {
   try {
-    const html5QrCode = new Html5Qrcode("video");
+    const html5QrCode = new Html5Qrcode("reader");
 
     const cameras = await Html5Qrcode.getCameras();
     if (!cameras || cameras.length === 0) {
@@ -50,11 +50,13 @@ async function start() {
       qr => handleResult(qr)
     );
 
-    document.getElementById("status").textContent = "Camera ready — point to a QR";
+    document.getElementById("status").textContent =
+      "Camera ready — point to a QR";
     updateCount();
 
   } catch (e) {
-    document.getElementById("status").textContent = "Camera error: " + (e.message || e);
+    document.getElementById("status").textContent =
+      "Camera error: " + (e.message || e);
   }
 }
 
