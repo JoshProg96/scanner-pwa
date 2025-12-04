@@ -67,18 +67,24 @@ function showResult(text,color){
 /* START CAMERA */
 async function startCamera(){
     const status = document.getElementById("status");
+    const video = document.getElementById("video");
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode:"environment" },
             audio:false
         });
-        const video = document.getElementById("video");
+
         video.srcObject = stream;
 
+        // 👇 WAJIB: tunggu benar-benar siap
         video.onloadedmetadata = () => {
-            status.innerText = "Camera Ready";
-            requestAnimationFrame(scanLoop);
+            video.play();
+
+            setTimeout(() => {
+                status.innerText = "Camera Ready";
+                requestAnimationFrame(scanLoop);
+            }, 300); // extra delay for iPhone
         };
 
     } catch (e){
@@ -87,48 +93,50 @@ async function startCamera(){
     }
 }
 
-/* SCAN LOOP (uses BarcodeDetector if available) */
+/* SCAN LOOP */
 async function scanLoop(){
-    const now = Date.now();
-    if(now - lastScan < COOLDOWN || isProcessing){
-        requestAnimationFrame(scanLoop);
-        return;
+    const video = document.getElementById("video");
+
+    // Jika video belum siap → ulangi loop
+    if (video.readyState !== 4 || video.videoWidth === 0){
+        return requestAnimationFrame(scanLoop);
     }
 
-    const video = document.getElementById("video");
-    if(video.readyState !== 4){
-        requestAnimationFrame(scanLoop);
-        return;
+    const now = Date.now();
+    if (now - lastScan < COOLDOWN || isProcessing){
+        return requestAnimationFrame(scanLoop);
     }
 
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    ctx.drawImage(video,0,0);
 
-    // --- Attempt 1: BarcodeDetector (FASTEST)
+    ctx.drawImage(video, 0, 0);
+
+    // 🔥 TRY 1: BarcodeDetector
     if ("BarcodeDetector" in window){
         try {
-            const detector = new BarcodeDetector({ formats: ["qr_code"] });
+            const detector = new BarcodeDetector({ formats:["qr_code"] });
             const codes = await detector.detect(canvas);
             if (codes.length > 0){
-                processQR(codes[0].rawValue);
-                return;
+                return processQR(codes[0].rawValue);
             }
-        } catch {}
+        } catch(e){}
     }
 
-    // --- Attempt 2: jsQR fallback (Safari)
-    const img = ctx.getImageData(0,0,canvas.width,canvas.height);
-    const code = jsQR(img.data, canvas.width, canvas.height);
+    // 🔥 TRY 2: jsQR (Safari fallback)
+    let img = ctx.getImageData(0,0,canvas.width,canvas.height);
+    let code = jsQR(img.data, canvas.width, canvas.height);
+
     if (code){
-        processQR(code.data);
-        return;
+        return processQR(code.data);
     }
 
     requestAnimationFrame(scanLoop);
 }
+
 
 /* PROCESS QR */
 async function processQR(text){
