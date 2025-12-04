@@ -219,4 +219,13 @@ document.addEventListener("DOMContentLoaded", startCamera);
 </script>
 
 </body>
+
+    <script>
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/scanner-pwa/service-worker.js")
+        .catch(err => console.log("SW failed:", err));
+}
+</script>
+
+    
 </html>
