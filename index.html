@@ -8,8 +8,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 
-<!-- ZXING UMD BUILD (IMPORTANT FIX) -->
-<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/umd/index.min.js"></script>
+<!-- ZXING (STABLE BROWSER VERSION) -->
+<script src="https://unpkg.com/@zxing/library@0.18.6"></script>
 
 <style>
     body { margin:0; background:#000; color:#fff; overflow:hidden; font-family:sans-serif; }
@@ -20,7 +20,7 @@
         width:65%; height:35%;
         border:4px solid rgba(255,255,255,0.8);
         border-radius:12px;
-        transform:translate(-50%, -50%);
+        transform:translate(-50%,-50%);
         box-shadow:0 0 15px rgba(255,255,255,0.7);
     }
     #result-box {
@@ -31,19 +31,14 @@
     #status {
         position:fixed; top:10px; right:12px;
         background:rgba(0,0,0,0.5);
-        padding:8px 12px; border-radius:8px; font-size:14px;
-    }
-    #offline-warning {
-        position:fixed; top:0; width:100%; padding:10px;
-        background:#ffcc00; color:#000; display:none; text-align:center;
-        font-weight:bold;
+        padding:8px 12px; border-radius:8px;
+        font-size:14px;
     }
 </style>
 </head>
 
 <body>
 
-<div id="offline-warning">⚠ Tidak ada koneksi internet.</div>
 <div id="status">Loading camera...</div>
 
 <div id="camera-container">
@@ -54,97 +49,84 @@
 <div id="result-box"></div>
 
 <script>
-/* ====== UTIL ====== */
-function vibrate(ms=80){ if(navigator.vibrate) navigator.vibrate(ms); }
-setInterval(()=>{ document.getElementById("offline-warning").style.display = navigator.onLine ? "none":"block"; },1000);
+/* --- LIMIT SCAN SPEED --- */
+let lastScan = 0;
+let isProcessing = false;
+const COOLDOWN = 2000;
 
-/* ====== CONSTANT ====== */
-let lastScan=0, isProcessing=false;
-const COOLDOWN=2000;
-const VERIFY_URL="https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
+const VERIFY_URL =
+ "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
 
-const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
+function vibrate(ms=70){ if(navigator.vibrate) navigator.vibrate(ms); }
 
-/* ====== REMOVE SERVICE WORKER ====== */
-if("serviceWorker" in navigator){
-    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r=>r.unregister()));
-}
-
-/* ====== RESULT BOX ====== */
 function showResult(text,color){
     const box=document.getElementById("result-box");
-    box.innerText=text; box.style.background=color;
+    box.innerText=text;
+    box.style.background=color;
     box.style.display="block";
 }
 
-/* ====== SCANNER LOGIC ====== */
+/* REMOVE SERVICE WORKER (prevent camera block) */
+if("serviceWorker" in navigator){
+    navigator.serviceWorker.getRegistrations().then(regs=>{
+        regs.forEach(r=>r.unregister());
+    });
+}
+
+/* --- CAMERA START (ZXING v0.18.6) --- */
 async function startScanner(){
-    const video=document.getElementById("video");
-    const statusEl=document.getElementById("status");
+    const video = document.getElementById("video");
+    const statusEl = document.getElementById("status");
 
     try {
-        let devices=[];
-        try{ devices=await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices(); }
-        catch(e){ devices=[]; }
+        const hints = new ZXing.DecodeHintType();
+        const formats = [ ZXing.BarcodeFormat.QR_CODE ];
+        const reader = new ZXing.BrowserMultiFormatReader();
 
-        let cameraId;
-        if(devices.length>0){
-            const back=devices.find(d=>d.label?.toLowerCase().includes("back"));
-            const env=devices.find(d=>d.label?.toLowerCase().includes("environment"));
-            let pick=back||env||devices[0];
-            cameraId=pick.deviceId;
+        // Choose camera
+        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+        let cameraId = undefined;
+
+        if(devices.length > 0){
+            const back = devices.find(d=>d.label?.toLowerCase().includes("back"));
+            const env = devices.find(d=>d.label?.toLowerCase().includes("environment"));
+            cameraId = (back || env || devices[0]).deviceId;
         }
 
         statusEl.innerText="Camera Ready";
 
-        /* Try ZXing with deviceId */
-        try{
-            if(cameraId){
-                await codeReader.decodeFromVideoDevice(cameraId, video, onScan);
-                return;
-            }
-        }catch(e){ console.warn("ZXing with deviceId failed",e); }
+        // Start decode
+        await reader.decodeFromVideoDevice(cameraId, video, onResult);
 
-        /* Fallback getUserMedia */
-        const stream=await navigator.mediaDevices.getUserMedia({
-            video:{ facingMode:"environment" },
-            audio:false
-        });
-        video.srcObject=stream;
-
-        await new Promise(r=>setTimeout(r,400));
-        codeReader.decodeFromVideoDevice(null, video, onScan);
-
-    } catch(e){
+    } catch (e) {
         console.error(e);
-        alert("Camera error. Pastikan izin kamera ON dan gunakan Safari/Chrome.");
+        alert("Tidak bisa buka kamera. Izinkan kamera di Safari/Chrome.");
     }
 }
 
-/* ====== ZXing callback ====== */
-async function onScan(result,err){
+async function onResult(result,err){
     if(!result) return;
 
-    const now=Date.now();
-    if(now-lastScan<COOLDOWN) return;
+    const now = Date.now();
+    if(now - lastScan < COOLDOWN) return;
     if(isProcessing) return;
 
-    lastScan=now; isProcessing=true;
-    vibrate(80);
+    lastScan = now;
+    isProcessing = true;
 
-    const qr=result.text;
+    vibrate();
+
+    const qr = result.getText();
     showResult("⏳ Checking...", "#222");
 
     try{
-        const res=await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`,{
-            method:"GET", cache:"no-store"
-        });
-        const html=await res.text();
+        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, { cache:"no-store" });
+        const html = await res.text();
 
-        if(html.includes("Tiket valid")) showResult("✅ Tiket Valid","#00cc66");
-        else if(html.includes("digunakan")) showResult("❌ Sudah Dipakai","#cc0000");
-        else if(html.includes("tidak ditemukan")) showResult("❌ Tidak Ditemukan","#cc0000");
-        else showResult("⚠ Error","#ffaa00");
+        if(html.includes("Tiket valid")) showResult("✅ Tiket Valid", "#00cc66");
+        else if(html.includes("digunakan")) showResult("❌ Sudah Dipakai", "#cc0000");
+        else if(html.includes("tidak ditemukan")) showResult("❌ Tidak Ditemukan", "#cc0000");
+        else showResult("⚠ Error", "#ffaa00");
 
     }catch(e){
         showResult("⚠ Koneksi bermasalah","#ffaa00");
@@ -153,11 +135,10 @@ async function onScan(result,err){
     setTimeout(()=>{
         document.getElementById("result-box").style.display="none";
         isProcessing=false;
-    },COOLDOWN);
+    }, COOLDOWN);
 }
 
-/* ====== START ====== */
-document.addEventListener("DOMContentLoaded",()=>setTimeout(startScanner,200));
+document.addEventListener("DOMContentLoaded", ()=> setTimeout(startScanner,200));
 </script>
 
 </body>
