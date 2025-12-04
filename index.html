@@ -120,6 +120,15 @@ const VERIFY_URL = "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmv
 
 const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
 
+    if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => {
+            console.log("Unregistering old SW");
+            r.unregister();
+        });
+    });
+}
+
 async function startScanner() {
     try {
         const video = document.getElementById("video");
