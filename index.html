@@ -1,37 +1,65 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Hope Awakened Scanner</title>
 
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+
+<!-- jsQR Fallback for iPhone -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
 <style>
-    body { margin:0; background:#000; color:#fff; overflow:hidden; font-family:sans-serif; }
-    video { position:fixed; inset:0; width:100vw; height:100vh; object-fit:cover; background:#000; }
+    body {
+        margin: 0;
+        background: #000;
+        color: #fff;
+        overflow: hidden;
+        font-family: sans-serif;
+    }
+    video {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;
+        background: #000;
+    }
     #frame {
-        position:fixed; top:50%; left:50%;
-        width:65%; height:35%;
-        border:4px solid rgba(255,255,255,0.8);
-        border-radius:12px;
-        transform:translate(-50%,-50%);
-        box-shadow:0 0 15px rgba(255,255,255,0.7);
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 65%;
+        height: 35%;
+        border: 4px solid rgba(255, 255, 255, 0.8);
+        border-radius: 12px;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.7);
     }
     #result-box {
-        position:fixed; bottom:0; width:100%; padding:20px;
-        font-size:26px; font-weight:bold; text-align:center;
-        display:none;
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        padding: 20px;
+        text-align: center;
+        font-size: 26px;
+        display: none;
+        font-weight: bold;
     }
     #status {
-        position:fixed; top:10px; right:12px;
-        background:rgba(0,0,0,0.5); padding:8px 12px;
-        border-radius:8px; font-size:14px;
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        background: rgba(0, 0, 0, 0.6);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 14px;
     }
 </style>
-
 </head>
+
 <body>
 
 <div id="status">Loading camera…</div>
@@ -40,9 +68,8 @@
 <div id="frame"></div>
 <div id="result-box"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
-
 <script>
+/* CONSTANTS */
 let lastScan = 0;
 let isProcessing = false;
 const COOLDOWN = 2000;
@@ -50,60 +77,62 @@ const COOLDOWN = 2000;
 const VERIFY_URL =
  "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
 
-/* REMOVE SW */
-if ("serviceWorker" in navigator){
-    navigator.serviceWorker.getRegistrations().then(r=>r.forEach(x=>x.unregister()));
+/* REMOVE OLD SERVICE WORKER */
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.unregister());
+    });
 }
 
-function vibrate(ms=70){ if(navigator.vibrate) navigator.vibrate(ms); }
+/* Vibrate (haptic feedback) */
+function vibrate(ms = 80) {
+    if (navigator.vibrate) navigator.vibrate(ms);
+}
 
-function showResult(text,color){
+/* Display Result */
+function showResult(text, color) {
     const box = document.getElementById("result-box");
     box.innerText = text;
     box.style.background = color;
     box.style.display = "block";
 }
 
-/* START CAMERA */
-async function startCamera(){
+/* CAMERA STARTER */
+async function startCamera() {
     const status = document.getElementById("status");
     const video = document.getElementById("video");
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode:"environment" },
-            audio:false
+            video: { facingMode: "environment" },
+            audio: false
         });
 
         video.srcObject = stream;
 
-        // 👇 WAJIB: tunggu benar-benar siap
         video.onloadedmetadata = () => {
             video.play();
-
             setTimeout(() => {
                 status.innerText = "Camera Ready";
                 requestAnimationFrame(scanLoop);
-            }, 300); // extra delay for iPhone
+            }, 400); // iPhone needs delay
         };
-
-    } catch (e){
-        console.error(e);
+    } catch (e) {
         alert("Tidak bisa membuka kamera. Pastikan sudah diizinkan.");
+        console.error(e);
     }
 }
 
-/* SCAN LOOP */
-async function scanLoop(){
+/* MAIN SCAN LOOP */
+async function scanLoop() {
     const video = document.getElementById("video");
 
-    // Jika video belum siap → ulangi loop
-    if (video.readyState !== 4 || video.videoWidth === 0){
+    if (video.readyState !== 4 || video.videoWidth === 0) {
         return requestAnimationFrame(scanLoop);
     }
 
     const now = Date.now();
-    if (now - lastScan < COOLDOWN || isProcessing){
+    if (now - lastScan < COOLDOWN || isProcessing) {
         return requestAnimationFrame(scanLoop);
     }
 
@@ -115,33 +144,33 @@ async function scanLoop(){
 
     ctx.drawImage(video, 0, 0);
 
-    // 🔥 TRY 1: BarcodeDetector
-    if ("BarcodeDetector" in window){
+    /* TRY 1 — FAST: BarcodeDetector (Android + Chrome) */
+    if ("BarcodeDetector" in window) {
         try {
-            const detector = new BarcodeDetector({ formats:["qr_code"] });
+            const detector = new BarcodeDetector({ formats: ["qr_code"] });
             const codes = await detector.detect(canvas);
-            if (codes.length > 0){
+
+            if (codes.length > 0) {
                 return processQR(codes[0].rawValue);
             }
-        } catch(e){}
+        } catch (e) {}
     }
 
-    // 🔥 TRY 2: jsQR (Safari fallback)
-    let img = ctx.getImageData(0,0,canvas.width,canvas.height);
-    let code = jsQR(img.data, canvas.width, canvas.height);
+    /* TRY 2 — SAFARI FALLBACK: jsQR */
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(img.data, canvas.width, canvas.height);
 
-    if (code){
+    if (code) {
         return processQR(code.data);
     }
 
     requestAnimationFrame(scanLoop);
 }
 
-
-/* PROCESS QR */
-async function processQR(text){
+/* PROCESS QR VALUE */
+async function processQR(text) {
     const now = Date.now();
-    if(now - lastScan < COOLDOWN || isProcessing) return;
+    if (now - lastScan < COOLDOWN || isProcessing) return;
 
     lastScan = now;
     isProcessing = true;
@@ -149,21 +178,32 @@ async function processQR(text){
     vibrate();
     showResult("⏳ Checking…", "#222");
 
-    try{
-        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(text)}`, {cache:"no-store"});
+    try {
+        const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(text)}`, {
+            method: "GET",
+            cache: "no-store"
+        });
+
         const html = await res.text();
 
-        if(html.includes("Tiket valid")) showResult("✅ Tiket Valid","#00cc66");
-        else if(html.includes("digunakan")) showResult("❌ Sudah Dipakai","#cc0000");
-        else if(html.includes("tidak ditemukan")) showResult("❌ Tidak Ditemukan","#cc0000");
-        else showResult("⚠ Error","#ffaa00");
+        if (html.includes("Tiket valid"))
+            showResult("✅ Tiket Valid", "#00cc66");
+        else if (html.includes("digunakan"))
+            showResult("❌ Sudah Dipakai", "#cc0000");
+        else if (html.includes("tidak ditemukan"))
+            showResult("❌ Tidak Ditemukan", "#cc0000");
+        else if (html.includes("Belum Aktif"))
+            showResult("⏳ Belum Aktif", "#ffaa00");
+        else
+            showResult("⚠ Error", "#ffaa00");
 
-    }catch(e){
-        showResult("⚠ Koneksi bermasalah","#ffaa00");
+    } catch (e) {
+        showResult("⚠ Koneksi bermasalah", "#ffaa00");
+        console.error(e);
     }
 
-    setTimeout(()=>{
-        document.getElementById("result-box").style.display="none";
+    setTimeout(() => {
+        document.getElementById("result-box").style.display = "none";
         isProcessing = false;
     }, COOLDOWN);
 
