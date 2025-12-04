@@ -1,72 +1,209 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>QR Scanner</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hope Awakened Scanner</title>
 
-<!-- FIX 1: Pakai versi stabil -->
-<script src="https://unpkg.com/html5-qrcode@2.3.8"></script>
+<!-- ZXING BROWSER (FAST) -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@latest"></script>
 
 <style>
-body { font-family: Arial; padding:20px; }
-#reader { width:100%; max-width:350px; margin:auto; }
-#status { margin-top:10px; font-weight:bold; }
-</style>
-</head>
-<body>
-
-<h2>QR Scanner</h2>
-
-<div id="reader"></div>
-<div id="status">Loading camera…</div>
-
-<script>
-/* Update count */
-function updateCount() {
-  const items = JSON.parse(localStorage.getItem("scanned") || "[]");
-  document.getElementById("status").textContent =
-    "Stored: " + items.length + " data";
-}
-
-/* Save result */
-function handleResult(qr) {
-  const items = JSON.parse(localStorage.getItem("scanned") || "[]");
-  items.push({ data: qr, time: new Date().toISOString() });
-  localStorage.setItem("scanned", JSON.stringify(items));
-  updateCount();
-}
-
-/* Start scanner */
-async function start() {
-  try {
-    const html5QrCode = new Html5Qrcode("reader");
-
-    const cameras = await Html5Qrcode.getCameras();
-    if (!cameras || cameras.length === 0) {
-      throw new Error("No camera found");
+    body {
+        margin: 0;
+        background: #000;
+        color: white;
+        font-family: Arial, sans-serif;
+        overflow: hidden;
     }
 
-    const cameraId = cameras[cameras.length - 1].id;
+    #camera-container {
+        position: fixed;
+        inset: 0;
+        background: black;
+    }
 
-    await html5QrCode.start(
-      cameraId,
-      { fps: 10, qrbox: 250 },
-      qr => handleResult(qr)
-    );
+    video {
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;
+    }
 
-    document.getElementById("status").textContent =
-      "Camera ready — point to a QR";
-    updateCount();
+    /* FRAME */
+    #frame {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 65%;
+        height: 35%;
+        border: 4px solid rgba(255,255,255,0.8);
+        border-radius: 12px;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 15px rgba(255,255,255,0.7);
+    }
 
-  } catch (e) {
-    document.getElementById("status").textContent =
-      "Camera error: " + (e.message || e);
-  }
+    /* RESULT BOX */
+    #result-box {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        padding: 18px;
+        text-align: center;
+        font-size: 24px;
+        display: none;
+        font-weight: bold;
+    }
+
+    #status {
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        background: rgba(0,0,0,0.6);
+        padding: 8px 12px;
+        font-size: 14px;
+        border-radius: 8px;
+    }
+
+    #offline-warning {
+        position: fixed;
+        top: 0;
+        width: 100%;
+        background: #ffcc00;
+        color: black;
+        padding: 10px;
+        text-align: center;
+        display: none;
+        font-weight: bold;
+    }
+</style>
+</head>
+
+<body>
+<div id="offline-warning">⚠ Tidak ada koneksi internet — scanning memerlukan koneksi.</div>
+<div id="status">Loading camera...</div>
+
+<div id="camera-container">
+    <video id="video" autoplay></video>
+    <div id="frame"></div>
+</div>
+
+<div id="result-box"></div>
+
+<script>
+/* ============================================================
+   UTILITIES
+============================================================ */
+function beep() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    osc.frequency.value = 900;
+    osc.connect(ctx.destination);
+    osc.start();
+    setTimeout(() => osc.stop(), 120);
 }
 
-/* FIX 2: Ganti dari window.onload ke DOMContentLoaded */
-document.addEventListener("DOMContentLoaded", start);
+function vibrate(ms = 120) {
+    if (navigator.vibrate) navigator.vibrate(ms);
+}
+
+/* ============================================================
+   INTERNET CHECKER
+============================================================ */
+setInterval(() => {
+    document.getElementById("offline-warning").style.display =
+        navigator.onLine ? "none" : "block";
+}, 1000);
+
+/* ============================================================
+   ZXING SCANNER SETUP
+============================================================ */
+let lastScan = 0;
+let isProcessing = false;
+const SCAN_COOLDOWN = 2000; // 2 detik
+const VERIFY_URL = "https://script.google.com/macros/s/AKfycbw47LANRHx7VwAX_bzmviZdNEG4YlA2jThpa805CHT_AzewLukBarjMTIIDLEKzJ5G7ww/exec";
+
+const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
+
+async function startScanner() {
+    try {
+        const video = document.getElementById("video");
+
+        const devices = await ZXingBrowser.BrowserQRCodeReader.listVideoInputDevices();
+        const camera = devices.find(d => d.label.toLowerCase().includes("back"))
+                  || devices[0];
+
+        document.getElementById("status").innerText = "Camera Ready";
+
+        await codeReader.decodeFromVideoDevice(camera.deviceId, video, async (result, err) => {
+
+            if (!result) return;
+
+            const now = Date.now();
+            if (now - lastScan < SCAN_COOLDOWN) return;
+            if (isProcessing) return;
+
+            lastScan = now;
+            isProcessing = true;
+
+            const qr = result.text;
+            showResult("⏳ Checking...", "#222");
+
+            beep();
+            vibrate();
+
+            // CALL GOOGLE SCRIPT
+            try {
+                const res = await fetch(`${VERIFY_URL}?code=${encodeURIComponent(qr)}`, {
+                    method: "GET",
+                    redirect: "follow",
+                    cache: "no-store"
+                });
+
+                const html = await res.text();
+
+                if (html.includes("Tiket valid")) {
+                    showResult("✅ Tiket Valid", "#00cc66");
+                }
+                else if (html.includes("sudah digunakan")) {
+                    showResult("❌ Sudah Dipakai", "#cc0000");
+                }
+                else if (html.includes("tidak ditemukan")) {
+                    showResult("❌ Tidak Ditemukan", "#cc0000");
+                }
+                else if (html.includes("Belum Aktif")) {
+                    showResult("⏳ Belum Aktif", "#ffaa00");
+                }
+                else {
+                    showResult("⚠ Error", "#ffaa00");
+                }
+
+            } catch (e) {
+                showResult("⚠ Koneksi Bermasalah", "#ffaa00");
+            }
+
+            setTimeout(() => {
+                document.getElementById("result-box").style.display = "none";
+                isProcessing = false;
+            }, SCAN_COOLDOWN);
+        });
+
+    } catch (err) {
+        document.getElementById("status").innerText = "Camera Error";
+        alert("Camera gagal dibuka. Pastikan:\n\n- Izinkan kamera\n- Gunakan Safari / Chrome\n- Jangan dibuka dari Instagram/WA");
+    }
+}
+
+function showResult(text, color) {
+    const rb = document.getElementById("result-box");
+    rb.innerText = text;
+    rb.style.background = color;
+    rb.style.display = "block";
+}
+
+/* ============================================================
+   START
+============================================================ */
+startScanner();
 </script>
 
 </body>
