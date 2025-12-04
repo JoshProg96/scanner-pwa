@@ -1,32 +1,19 @@
-// SAFE SERVICE WORKER FOR QR SCANNER
-const CACHE_NAME = "scanner-cache-v1";
-const ASSETS = [
-  "/scanner-pwa/icon-192.png",
-  "/scanner-pwa/icon-512.png",
-  "/scanner-pwa/manifest.json"
-];
+// Disable cache for HTML/JS (avoid camera block)
+self.addEventListener("fetch", e => {
+  const req = e.request;
 
-// INSTALL
-self.addEventListener("install", event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
-  );
-});
-
-// ONLINE-FIRST for HTML + JS (IMPORTANT!!!)
-self.addEventListener("fetch", event => {
-  const req = event.request;
-
-  // NEVER cache HTML or JS → required for camera permission
   if (req.destination === "document" || req.destination === "script") {
-    event.respondWith(
-      fetch(req).catch(() => caches.match(req))
-    );
+    e.respondWith(fetch(req));
     return;
   }
 
-  // Icons / manifest → cache-first
-  event.respondWith(
-    caches.match(req).then(cached => cached || fetch(req))
+  // cache icons only
+  e.respondWith(
+    caches.open("qr-cache").then(cache =>
+      cache.match(req).then(res => res || fetch(req).then(f => {
+        cache.put(req, f.clone());
+        return f;
+      }))
+    )
   );
 });
