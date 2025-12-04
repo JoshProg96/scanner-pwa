@@ -72,14 +72,17 @@
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
 <script>
-/* REMOVE ALL SERVICE WORKERS (Wajib untuk kamera) */
-if ("serviceWorker" in navigator){
-    navigator.serviceWorker.getRegistrations().then(r => r.forEach(x => x.unregister()));
+/* REMOVE ALL SW FOR CAMERA STABILITY */
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs =>
+        regs.forEach(r => r.unregister())
+    );
 }
 
 /* Internet Warning */
 setInterval(() => {
-    offline-warning.style.display = navigator.onLine ? "none" : "block";
+    document.getElementById("offline-warning").style.display =
+        navigator.onLine ? "none" : "block";
 }, 800);
 
 const VERIFY_URL =
@@ -94,7 +97,7 @@ function vibrate(ms=80){
 }
 
 function showResult(text, color){
-    const box = result-box;
+    const box = document.getElementById("result-box");
     box.innerText = text;
     box.style.background = color;
     box.style.display = "block";
@@ -103,7 +106,9 @@ function showResult(text, color){
 /* Start Camera */
 async function startCamera(){
     const video = document.getElementById("video");
-    status.innerText = "Opening camera…";
+    const statusBox = document.getElementById("status");
+
+    statusBox.innerText = "Opening camera…";
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -116,13 +121,12 @@ async function startCamera(){
         video.onloadedmetadata = () => {
             video.play();
             setTimeout(() => {
-                status.innerText = "Camera Ready";
+                statusBox.innerText = "Camera Ready";
                 requestAnimationFrame(scanLoop);
             }, 300);
         };
 
     } catch (e){
-        console.error(e);
         alert("Tidak bisa membuka kamera. Pastikan izin kamera aktif.");
     }
 }
@@ -130,7 +134,10 @@ async function startCamera(){
 /* MAIN LOOP */
 async function scanLoop(){
     const video = document.getElementById("video");
-    if (video.readyState !== 4) return requestAnimationFrame(scanLoop);
+
+    if (video.readyState !== 4) {
+        return requestAnimationFrame(scanLoop);
+    }
 
     const now = Date.now();
     if (now - lastScan < COOLDOWN || isProcessing){
@@ -143,12 +150,11 @@ async function scanLoop(){
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    /* Improve scanning quality (helps reading QR from another phone) */
     ctx.filter = "contrast(180%) brightness(115%)";
     ctx.drawImage(video, 0, 0);
     ctx.filter = "none";
 
-    /* TRY 1: BarcodeDetector (super fast) */
+    /* TRY 1: BarcodeDetector */
     if ("BarcodeDetector" in window){
         try {
             const detector = new BarcodeDetector({ formats:["qr_code"] });
@@ -156,10 +162,10 @@ async function scanLoop(){
             if (codes.length > 0){
                 return processQR(codes[0].rawValue);
             }
-        } catch(_){}
+        } catch(_) {}
     }
 
-    /* TRY 2: jsQR fallback */
+    /* TRY 2: jsQR */
     const img = ctx.getImageData(0,0,canvas.width,canvas.height);
     const code = jsQR(img.data, canvas.width, canvas.height);
 
@@ -208,7 +214,7 @@ async function processQR(text){
     }
 
     setTimeout(() => {
-        result-box.style.display = "none";
+        document.getElementById("result-box").style.display = "none";
         isProcessing = false;
     }, COOLDOWN);
 
@@ -219,13 +225,4 @@ document.addEventListener("DOMContentLoaded", startCamera);
 </script>
 
 </body>
-
-    <script>
-if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/scanner-pwa/service-worker.js")
-        .catch(err => console.log("SW failed:", err));
-}
-</script>
-
-    
 </html>
